@@ -48,10 +48,18 @@ Prerequisites:
 
 ROS package for the camera and LiDAR you wish to calibrate.  
 
-Clone this repository to your machine.  
-Put the cloned repository, `dependencies/aruco_ros` and `dependencies/aruco_mapping` folders in `path/to/your/ros/workspace/src` and run `catkin_make`.
+### Installation
 
-Please note that `aruco_mapping` in the `dependencies` folder is a slightly modified version of the original [aruco_mapping](https://github.com/SmartRoboticSystems/aruco_mapping), so make sure to use the one provided here.
+Clone this repository to your machine.  
+Put the cloned repository, `dependencies/aruco_ros` and `dependencies/aruco_mapping` folders in `path/to/your/ros/workspace/src` and run the following commands,
+
+```bash
+catkin_make -DCATKIN_WHITELIST_PACKAGES="aruco;aruco_ros;aruco_msgs"
+catkin_make -DCATKIN_WHITELIST_PACKAGES="aruco_mapping;lidar_camera_calibration"
+catkin_make -DCATKIN_WHITELIST_PACKAGES=""
+```
+
+Please note that `aruco_mapping` in the `dependencies` folder is a slightly modified version of the original [aruco_mapping](https://github.com/SmartRoboticSystems/aruco_mapping), so make sure to use the one provided here. The aruco packages have to be installed before the main calibration package can be installed. Installing them together, in one run, can result in build errors. Hence the two separate `catkin_make` commands.
 
 Camera parameters will also be required by the package, so it is advised that you calibrate the camera beforehand.
 
@@ -73,7 +81,8 @@ There are a couple of configuration files that need to be specfied in order to c
 >611.651245 0.0        642.388357 0.0  
 >0.0        688.443726 365.971718 0.0  
 >0.0        0.0        1.0        0.0  
->1.57 -1.57 0.0
+>1.57 -1.57 0.0  
+>0
 
 The file contains specifications about the following:
 
@@ -92,6 +101,8 @@ The file contains specifications about the following:
 
 >initial_rot_x initial_rot_y initial_rot_z
 
+>lidar_type
+
 `x-` and `x+`, `y-` and `y+`, `z-` and `z+` are used to remove unwanted points in the cloud and are specfied in meters. The filtred point cloud makes it easier to mark the board edges. The filtered pointcloud contains all points   
 (x, y, z) such that,  
 x in [`x-`, `x+`]  
@@ -100,11 +111,24 @@ z in [`z-`, `z+`]
 
 The `cloud_intensity_threshold` is used to filter points that have intensity lower than a specified value. The default value at which it works well is `0.05`. However, while marking, if there seem to be missing/less points on the cardboard edges, tweaking this value will might help.
 
-The `use_camera_info_topic?` is a boolean flag and takes values `1` or `0`. The `find_transform.launch` node uses camera parameters to process the points and display them for marking. If you wish to use the `camera_info` topic to read off the parameters, set this to `1`. Else, the explicitly provided camera parameters in `config_file.txt` are used.
+The `use_camera_info_topic?` is a boolean flag and takes values `1` or `0`(**Though you can set it to 1 with using the camera_info topic, but we still recommend you strongly to set it to 0 and then using the calibration file, unless you make sure the camera info topic's value is consistent with calibration file or there is only a pretty small difference between them, otherwise, you won't the result you want**). The `find_transform.launch` node uses camera parameters to process the points and display them for marking. If you wish to use the `camera_info` topic to read off the parameters, set this to `1`. Else, the explicitly provided camera parameters in `config_file.txt` are used.
 
 `MAX_ITERS` is the number of iterations, you wish to run. The current pipeline assumes that the experimental setup: the boards are almost stationary and the camera and the LiDAR are fixed. The node will ask the user to mark the line-segments (see the video tutorial on how to go about marking [Usage](#usage)) for the first iteration. Once, the line-segments for each board have been marked, the algorithm runs for `MAX_ITERS`, collecting live data and producing n=`MAX_ITERS` sets of rotation and translation in the form of 4x4 matrix. Since, the marking is only done initially, the quadrilaterals should be drawn large enough such that if in the iterations that follow the boards move slightly (say, due to a gentle breeze) the edge points still fall in their respective quadrilaterals. After running for `MAX_ITERS` number of times, the node outputs an average translation vector (3x1) and an average rotation matrix (3x3). Averaging the translation vector is trivial; the rotations matrices are converted to quaternions and averaged, then converted back to a 3x3 rotation matrix.
 
-The last line is used to specify the initial orientation of the lidar with respect to the camera, in radians. The default values are for the case when both the lidar and the camera are both pointing forward. The final transformation that is estimated by the package accounts for this initial rotation.
+`initial_rot_x initial_rot_y initial_rot_z` is used to specify the initial orientation of the lidar with respect to the camera, in radians. The default values are for the case when both the lidar and the camera are both pointing forward. The final transformation that is estimated by the package accounts for this initial rotation.
+
+`lidar_type` is used to specify the lidar type. `0` for Velodyne; `1` for Hesai-Pandar40P.
+Hesai driver by default **does not** publish wall time as time stamps. To solve this, modify `lidarCallback` function in `/path/to/catkin_ws/src/HesaiLidar-ros/src/main.cc` as follows: 
+```
+void lidarCallback(boost::shared_ptr<PPointCloud> cld, double timestamp)
+{
+    pcl_conversions::toPCL(ros::Time(timestamp), cld->header.stamp);
+    sensor_msgs::PointCloud2 output;
+    pcl::toROSMsg(*cld, output);
+    output.header.stamp = ros::Time::now(); // ADD
+    lidarPublisher.publish(output);
+}
+```
 
 ### marker_coordinates.txt
 
